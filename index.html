@@ -1,0 +1,46 @@
+<!-- index.html -->
+
+
+function updateDropdown(products){
+productSelect.innerHTML = '<option value="">Produkt wählen...</option>';
+products.forEach(p=>{
+if(!p.borrower) productSelect.innerHTML += `<option value="${p.id}">${p.name}</option>`;
+});
+}
+
+
+function render(products){
+grid.innerHTML='';
+if(products.length===0){grid.innerHTML='<p style="grid-column:1/-1;text-align:center;color:var(--muted);">Keine Produkte vorhanden</p>';return;}
+for(const p of products){
+grid.innerHTML += `
+<article class="card">
+<div class="imgwrap"><img src="${p.image}" alt="${p.name}"></div>
+<div class="title">${p.name}</div>
+${p.borrower
+? `<div class="status" style="color:var(--danger)">Ausgeliehen von ${p.borrower}<br><small>seit ${p.borrowedSince}</small></div>
+<div class="actions"><button class="small danger" onclick="returnProduct('${p.id}')">Zurückgeben</button></div>`
+: `<div class="status" style="color:var(--success)">Verfügbar</div>`}
+</article>`;
+}
+}
+
+
+document.getElementById('borrowForm').addEventListener('submit', e=>{
+e.preventDefault();
+const pid = productSelect.value;
+const name = document.getElementById('borrowerName').value.trim();
+const date = document.getElementById('borrowDate').value || new Date().toISOString().slice(0,10);
+if(!pid || !name) return alert("Bitte Produkt und Name wählen!");
+productsRef.child(pid).update({ borrower: name, borrowedSince: date });
+e.target.reset();
+});
+
+
+function returnProduct(id){
+productsRef.child(id).update({ borrower: '', borrowedSince: '' });
+}
+window.returnProduct = returnProduct;
+</script>
+</body>
+</html>
