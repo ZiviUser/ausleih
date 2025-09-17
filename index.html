@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ausleihprogramm</title>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--accent:#2563eb;--muted:#6b7280;--danger:#dc2626;--success:#16a34a;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;}
+body{margin:0;background:var(--bg);color:#111827;}
+header{background:linear-gradient(90deg,#fff 0%,#eef2ff 100%);padding:20px;display:flex;gap:16px;align-items:center;justify-content:space-between;border-bottom:1px solid #e6e9f2;}
+h1{margin:0;font-size:1.25rem;}
+.container{max-width:1100px;margin:24px auto;padding:0 16px;}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px;}
+.card{background:var(--card);border-radius:14px;box-shadow:0 6px 18px rgba(12,36,80,0.06);padding:12px;display:flex;flex-direction:column;}
+.imgwrap{width:100%;height:160px;border-radius:10px;overflow:hidden;margin-bottom:10px;display:flex;align-items:center;justify-content:center;}
+.imgwrap img{width:100%;height:100%;object-fit:cover;}
+.title{font-weight:600;font-size:1.05rem;margin-bottom:6px;}
+.status{margin-top:8px;font-size:0.9rem;}
+.actions{margin-top:12px;display:flex;gap:8px;}
+button,a.btn{border:0;background:var(--accent);color:white;padding:6px 12px;border-radius:10px;cursor:pointer;font-weight:600;text-decoration:none;display:inline-block;}
+button.small{padding:4px 8px;font-size:0.85rem;border-radius:8px;}
+button.danger{background:var(--danger);}
+button.ghost{background:transparent;border:1px solid #ddd;color:#111827;}
+form.borrow-form{display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap;}
+select,input{padding:6px;border:1px solid #ddd;border-radius:6px;}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@1.35.7/dist/supabase.min.js"></script>
+</head>
+<body>
+<header>
+<div><h1>Ausleihprogramm</h1></div>
+<div class="top-controls">
+<a href="add.html" class="btn">Produkt hinzufügen</a>
+<button id="resetBtn" class="ghost">Zurücksetzen</button>
+</div>
+</header>
+
+<main class="container">
+<form class="borrow-form" id="borrowForm">
+<select id="productSelect" required></select>
+<input type="text" id="borrowerName" placeholder="Name" required>
+<input type="date" id="borrowDate">
+<button type="submit">Ausleihen</button>
+</form>
+
+<div class="grid" id="productGrid"></div>
+</main>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const SUPABASE_URL = 'https://wjjquuzhnezjgqtawury.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndqanF1dXpobmV6amdxdXJ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTgwOTYzNTksImV4cCI6MjA3MzY3MjM1OX0.TAxk9lGRRD5hWAq8PbaysICEzjvd7A2j9OF30MQmiCk';
+  const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  const grid = document.getElementById('productGrid');
+  const productSelect = document.getElementById('productSelect');
+
+  function cryptoRandomId(){return 'p_'+Math.random().toString(36).slice(2,10);}
+
+  async function loadProducts(){
+    const { data, error } = await supabaseClient.from('products').select('*');
+    if(error){ console.error(error); return []; }
+    return data;
+  }
+
+  async function render(){
+    const products = await loadProducts();
+    productSelect.innerHTML = '<option value="">Produkt wählen...</option>';
+    grid.innerHTML = '';
+    if(products.length===0){ grid.innerHTML='<p style="grid-column:1/-1;text-align:center;color:var(--muted);">Keine Produkte vorhanden</p>'; return; }
+
+    products.forEach(p=>{
+      productSelect.innerHTML += `<option value="${p.id}">${p.name}</option>`;
+      grid.innerHTML += `
+      <article class="card">
+        <div class="imgwrap"><img src="${p.image}" alt="${p.name}"></div>
+        <div class="title">${p.name}</div>
+        ${p.borrower 
+          ? `<div class="status" style="color:var(--danger)">Ausgeliehen von ${p.borrower} <br><small>seit ${p.borrowedSince}</small></div>
+             <div class="actions"><button class="small danger" onclick="returnProduct('${p.id}')">Zurückgeben</button></div>`
+          : `<div class="status" style="color:var(--success)">Verfügbar</div>`}
+      </article>`;
+    });
+  }
+
+  document.getElementById('borrowForm').addEventListener('submit', async e=>{
+    e.preventDefault();
+    const pid = productSelect.value;
+    const name = document.getElementById('borrowerName').value.trim();
+    const date = document.getElementById('borrowDate').value || new Date().toISOString().slice(0,10);
+    if(!pid || !name) return alert("Bitte Produkt und Name wählen!");
+
+    const { data, error } = await supabaseClient.from('products').update({borrower:name, borrowedSince:date}).eq('id', pid);
+    if(error){ console.error(error); return alert('Fehler beim Ausleihen'); }
+    render();
+  });
+
+  window.returnProduct = async function(id){
+    const { data, error } = await supabaseClient.from('products').update({borrower:'', borrowedSince:null}).eq('id', id);
+    if(error){ console.error(error); return alert('Fehler beim Zurückgeben'); }
+    render();
+  }
+
+  document.getElementById('resetBtn').addEventListener('click', async ()=>{
+    if(confirm("Alle Produkte löschen?")){
+      const { error } = await supabaseClient.from('products').delete().neq('id','');
+      if(error){ console.error(error); return alert('Fehler beim Löschen'); }
+      render();
+    }
+  });
+
+  render();
+});
+</script>
+</body>
+</html>
