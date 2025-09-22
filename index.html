@@ -1,46 +1,170 @@
-<!-- index.html -->
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Produktverwaltung</title>
+<style>
+body{font-family:Arial,sans-serif;margin:0;padding:16px;background:#f6f7fb}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+button{padding:8px 12px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer}
+.form-row{display:flex;gap:12px;align-items:center;margin:16px 0;flex-wrap:wrap}
+select,input[type=text],input[type=date]{padding:8px;border-radius:6px;border:1px solid #ccc}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-top:18px}
+.card{background:#fff;border-radius:8px;padding:10px;box-shadow:0 1px 4px rgba(0,0,0,0.1);text-align:center;cursor:default;transition:0.2s}
+.card img{max-width:100%;height:120px;object-fit:contain;border-radius:6px}
+.meta{margin-top:8px;font-size:13px}
+.loan-info{color:red;font-size:12px;margin-top:4px}
+.delete-mode .card{cursor:pointer;border:2px solid #ff6666}
+.delete-mode .card:hover{background:#ffecec}
+</style>
+</head>
+<body>
 
+<header>
+<h1>Produktverwaltung</h1>
+<div class="controls">
+<button id="btn-select-folder">Ordner auswählen</button>
+<button id="btn-change-folder">Ordner wechseln</button>
+<button id="btn-open-manage">Produkt hinzufügen</button>
+<button id="btn-delete">Produkt löschen</button>
+<button id="btn-reset">Komplett zurücksetzen</button>
+</div>
+</header>
 
-function updateDropdown(products){
-productSelect.innerHTML = '<option value="">Produkt wählen...</option>';
-products.forEach(p=>{
-if(!p.borrower) productSelect.innerHTML += `<option value="${p.id}">${p.name}</option>`;
+<section>
+<div class="form-row">
+<label for="sel-product">Produkt</label>
+<select id="sel-product"><option value="">-- kein Produkt ausgewählt --</option></select>
+<label for="txt-from">Von wem</label>
+<input id="txt-from" type="text" placeholder="Name">
+<label for="dt-wann">Wann</label>
+<input id="dt-wann" type="date">
+<button id="btn-record">Ausleihe speichern</button>
+</div>
+
+<div id="last-message" style="font-size:14px;color:#444"></div>
+
+<h2>Produkte</h2>
+<div id="product-grid" class="grid"></div>
+</section>
+
+<script>
+let dirHandle = null;
+let deleteMode = false;
+const STORAGE_KEY='produkte_app_items_v1';
+
+function loadProducts(){ return JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]'); }
+
+async function saveProducts(items){
+  localStorage.setItem(STORAGE_KEY,JSON.stringify(items));
+  if(!dirHandle) return;
+  const fileHandle = await dirHandle.getFileHandle('produkte.json',{create:true});
+  const writable = await fileHandle.createWritable();
+  await writable.write(JSON.stringify(items,null,2));
+  await writable.close();
+}
+
+async function saveImage(name,data){
+  if(!dirHandle) return;
+  const imgHandle = await dirHandle.getFileHandle(name+'.png',{create:true});
+  const writable = await imgHandle.createWritable();
+  const res = await fetch(data);
+  const blob = await res.blob();
+  await writable.write(blob);
+  await writable.close();
+}
+
+async function selectFolder(){
+  dirHandle = await window.showDirectoryPicker();
+  alert('Ordner ausgewählt. Produkte werden direkt gespeichert.');
+  try {
+    const fileHandle = await dirHandle.getFileHandle('produkte.json');
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    localStorage.setItem(STORAGE_KEY,text);
+  } catch(e){
+    console.log('Keine produkte.json gefunden, neue wird erstellt.');
+    await saveProducts([]);
+  }
+  renderProductOptions();
+  renderGrid();
+}
+
+async function changeFolder(){
+  dirHandle = null; // vorherigen Handle löschen
+  await selectFolder(); // neuen auswählen und laden
+  document.getElementById('last-message').textContent = 'Ordner wurde gewechselt.';
+}
+
+function renderProductOptions(){
+  const sel=document.getElementById('sel-product');
+  const items=loadProducts();
+  sel.innerHTML='<option value="">-- kein Produkt ausgewählt --</option>';
+  items.forEach(p=>{ const opt=document.createElement('option'); opt.value=p.id; opt.textContent=p.name; sel.appendChild(opt); });
+}
+
+function renderGrid(){
+  const grid=document.getElementById('product-grid');
+  const items=loadProducts();
+  grid.innerHTML='';
+  if(items.length===0){ grid.innerHTML='<div style="grid-column:1/-1;color:#666">Keine Produkte vorhanden</div>'; return; }
+  items.forEach(p=>{
+    const card=document.createElement('div'); card.className='card';
+    const img=document.createElement('img'); img.alt=p.name; img.src=p.imageData||'';
+    const name=document.createElement('div'); name.className='meta'; name.textContent=p.name;
+    card.appendChild(img); card.appendChild(name);
+    if(p.ausgeliehenVon&&p.ausgeliehenAm){
+      const loanInfo=document.createElement('div'); loanInfo.className='loan-info';
+      loanInfo.textContent=`Verliehen an ${p.ausgeliehenVon} (seit ${p.ausgeliehenAm})`;
+      card.appendChild(loanInfo);
+    }
+    card.addEventListener('click', async ()=>{
+      const items=loadProducts();
+      const index=items.findIndex(x=>x.id===p.id);
+      if(deleteMode){
+        if(confirm(`Soll das Produkt "${p.name}" wirklich gelöscht werden?`)){
+          items.splice(index,1); await saveProducts(items); renderProductOptions(); renderGrid(); exitDeleteMode();
+        }
+      } else if(p.ausgeliehenVon||p.ausgeliehenAm){
+        if(confirm(`"${p.name}" zurückgeben?`)){
+          items[index].ausgeliehenVon=''; items[index].ausgeliehenAm=''; await saveProducts(items); renderGrid();
+          document.getElementById('last-message').textContent=`Rückgabe gespeichert: ${items[index].name} ist wieder verfügbar.`;
+        }
+      }
+    });
+    grid.appendChild(card);
+  });
+  grid.classList.toggle('delete-mode',deleteMode);
+}
+
+function enterDeleteMode(){ deleteMode=true; document.getElementById('last-message').textContent='Löschmodus: Klicke ein Produkt, um es zu löschen.'; renderGrid(); }
+function exitDeleteMode(){ deleteMode=false; document.getElementById('last-message').textContent=''; renderGrid(); }
+
+document.getElementById('btn-select-folder').addEventListener('click', selectFolder);
+document.getElementById('btn-change-folder').addEventListener('click', changeFolder);
+document.getElementById('btn-open-manage').addEventListener('click',()=>{ window.open('manage.html','_blank'); });
+document.getElementById('btn-delete').addEventListener('click',()=>{ deleteMode?exitDeleteMode():enterDeleteMode(); });
+document.getElementById('btn-reset').addEventListener('click', async ()=>{
+  if(!confirm('Alle Produkte und Daten komplett zurücksetzen?')) return;
+  localStorage.removeItem(STORAGE_KEY); renderProductOptions(); renderGrid();
+  if(dirHandle){ await saveProducts([]); }
+  document.getElementById('last-message').textContent='Komplett zurückgesetzt.';
 });
-}
-
-
-function render(products){
-grid.innerHTML='';
-if(products.length===0){grid.innerHTML='<p style="grid-column:1/-1;text-align:center;color:var(--muted);">Keine Produkte vorhanden</p>';return;}
-for(const p of products){
-grid.innerHTML += `
-<article class="card">
-<div class="imgwrap"><img src="${p.image}" alt="${p.name}"></div>
-<div class="title">${p.name}</div>
-${p.borrower
-? `<div class="status" style="color:var(--danger)">Ausgeliehen von ${p.borrower}<br><small>seit ${p.borrowedSince}</small></div>
-<div class="actions"><button class="small danger" onclick="returnProduct('${p.id}')">Zurückgeben</button></div>`
-: `<div class="status" style="color:var(--success)">Verfügbar</div>`}
-</article>`;
-}
-}
-
-
-document.getElementById('borrowForm').addEventListener('submit', e=>{
-e.preventDefault();
-const pid = productSelect.value;
-const name = document.getElementById('borrowerName').value.trim();
-const date = document.getElementById('borrowDate').value || new Date().toISOString().slice(0,10);
-if(!pid || !name) return alert("Bitte Produkt und Name wählen!");
-productsRef.child(pid).update({ borrower: name, borrowedSince: date });
-e.target.reset();
+document.getElementById('btn-record').addEventListener('click', async ()=>{
+  const sel=document.getElementById('sel-product'); const id=sel.value;
+  const from=document.getElementById('txt-from').value.trim(); const date=document.getElementById('dt-wann').value;
+  if(!id||!from||!date){ alert('Bitte Produkt auswählen, Namen und Datum angeben.'); return; }
+  const items=loadProducts(); const index=items.findIndex(p=>p.id===id);
+  items[index].ausgeliehenVon=from; items[index].ausgeliehenAm=date; await saveProducts(items);
+  if(items[index].imageData) await saveImage(items[index].name,items[index].imageData);
+  renderGrid();
+  document.getElementById('last-message').textContent=`Ausleihe gespeichert: ${items[index].name} — von ${from} am ${date}`;
 });
 
-
-function returnProduct(id){
-productsRef.child(id).update({ borrower: '', borrowedSince: '' });
-}
-window.returnProduct = returnProduct;
+renderProductOptions();
+renderGrid();
 </script>
 </body>
 </html>
